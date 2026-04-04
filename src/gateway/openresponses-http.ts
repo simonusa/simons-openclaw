@@ -428,6 +428,7 @@ async function runResponsesAgentCommand(params: {
   messageChannel: string;
   senderIsOwner: boolean;
   deps: ReturnType<typeof createDefaultDeps>;
+  abortSignal?: AbortSignal;
 }) {
   return agentCommandFromIngress(
     {
@@ -444,6 +445,7 @@ async function runResponsesAgentCommand(params: {
       bestEffortDeliver: false,
       senderIsOwner: params.senderIsOwner,
       allowModelOverride: true,
+      abortSignal: params.abortSignal,
     },
     defaultRuntime,
     params.deps,
@@ -953,9 +955,14 @@ export async function handleOpenResponsesHttpRequest(
     }
   });
 
+  // Abort the embedded agent run when the HTTP client disconnects.
+  // Without this, cancelled requests leave Ollama NUM_PARALLEL slots occupied
+  // for up to agents.defaults.timeoutSeconds (e.g. 1200s).
+  const httpAbortController = new AbortController();
   req.on("close", () => {
     closed = true;
     unsubscribe();
+    httpAbortController.abort();
   });
 
   void (async () => {
@@ -972,6 +979,7 @@ export async function handleOpenResponsesHttpRequest(
         messageChannel,
         senderIsOwner,
         deps,
+        abortSignal: httpAbortController.signal,
       });
 
       finalUsage = extractUsageFromResult(result);
