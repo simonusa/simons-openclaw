@@ -962,7 +962,7 @@ export async function handleOpenResponsesHttpRequest(
   req.on("close", () => {
     closed = true;
     unsubscribe();
-    httpAbortController.abort();
+    httpAbortController.abort(new Error("client_disconnect"));
   });
 
   void (async () => {
