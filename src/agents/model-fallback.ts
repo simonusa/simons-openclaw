@@ -92,7 +92,29 @@ function isFallbackAbortError(err: unknown): boolean {
   return name === "AbortError";
 }
 
+/**
+ * Check if an abort was caused by the HTTP client disconnecting.
+ * When the client is gone, retrying with a fallback model wastes resources
+ * (tokens, GPU slots) since no one will receive the response.
+ *
+ * The /v1/responses handler calls `controller.abort(new Error("client_disconnect"))`.
+ * In Node.js, fetch throws the abort reason directly — an Error with
+ * message "client_disconnect" (not a DOMException).
+ */
+function isClientDisconnectAbort(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  if ("message" in err && (err as { message: string }).message === "client_disconnect") {
+    return true;
+  }
+  return false;
+}
+
 function shouldRethrowAbort(err: unknown): boolean {
+  if (isClientDisconnectAbort(err)) {
+    return true;
+  }
   return isFallbackAbortError(err) && !isTimeoutError(err);
 }
 
