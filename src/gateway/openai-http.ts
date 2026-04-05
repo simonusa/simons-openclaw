@@ -506,9 +506,21 @@ export async function handleOpenAiHttpRequest(
     senderIsOwner,
   });
 
+  // Abort the embedded agent run when the HTTP client disconnects.
+  // Without this, cancelled requests leave Ollama NUM_PARALLEL slots occupied
+  // for up to agents.defaults.timeoutSeconds (48h by default).
+  const httpAbortController = new AbortController();
+
   if (!stream) {
+    res.on("close", () => {
+      httpAbortController.abort(new Error("client_disconnect"));
+    });
     try {
-      const result = await agentCommandFromIngress(commandInput, defaultRuntime, deps);
+      const result = await agentCommandFromIngress(
+        { ...commandInput, abortSignal: httpAbortController.signal },
+        defaultRuntime,
+        deps,
+      );
 
       const content = resolveAgentResponseText(result);
 
@@ -581,14 +593,19 @@ export async function handleOpenAiHttpRequest(
     }
   });
 
-  req.on("close", () => {
+  res.on("close", () => {
     closed = true;
     unsubscribe();
+    httpAbortController.abort(new Error("client_disconnect"));
   });
 
   void (async () => {
     try {
-      const result = await agentCommandFromIngress(commandInput, defaultRuntime, deps);
+      const result = await agentCommandFromIngress(
+        { ...commandInput, abortSignal: httpAbortController.signal },
+        defaultRuntime,
+        deps,
+      );
 
       if (closed) {
         return;

@@ -959,7 +959,7 @@ export async function handleOpenResponsesHttpRequest(
   // Without this, cancelled requests leave Ollama NUM_PARALLEL slots occupied
   // for up to agents.defaults.timeoutSeconds (e.g. 1200s).
   const httpAbortController = new AbortController();
-  req.on("close", () => {
+  res.on("close", () => {
     closed = true;
     unsubscribe();
     httpAbortController.abort(new Error("client_disconnect"));
