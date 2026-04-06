@@ -702,7 +702,16 @@ export async function handleOpenResponsesHttpRequest(
       ? { maxTokens: payload.max_output_tokens }
       : undefined;
 
+  // Abort the embedded agent run when the HTTP client disconnects.
+  // Without this, cancelled requests leave Ollama NUM_PARALLEL slots occupied
+  // for up to agents.defaults.timeoutSeconds (48h by default).
+  const httpAbortController = new AbortController();
+
   if (!stream) {
+    res.on("close", () => {
+      logWarn(`openresponses: client disconnected, aborting non-streaming run runId=${responseId}`);
+      httpAbortController.abort(new Error("client_disconnect"));
+    });
     try {
       const result = await runResponsesAgentCommand({
         message: prompt.message,
@@ -716,6 +725,7 @@ export async function handleOpenResponsesHttpRequest(
         messageChannel,
         senderIsOwner,
         deps,
+        abortSignal: httpAbortController.signal,
       });
 
       const payloads = (result as { payloads?: Array<{ text?: string }> } | null)?.payloads;
@@ -955,13 +965,9 @@ export async function handleOpenResponsesHttpRequest(
     }
   });
 
-  // Abort the embedded agent run when the HTTP client disconnects.
-  // Without this, cancelled requests leave Ollama NUM_PARALLEL slots occupied
-  // for up to agents.defaults.timeoutSeconds (e.g. 1200s).
-  const httpAbortController = new AbortController();
   res.on("close", () => {
     if (!closed) {
-      logWarn(`openresponses: client disconnected, aborting agent run runId=${responseId}`);
+      logWarn(`openresponses: client disconnected, aborting streaming run runId=${responseId}`);
     }
     closed = true;
     unsubscribe();
