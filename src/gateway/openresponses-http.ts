@@ -708,9 +708,12 @@ export async function handleOpenResponsesHttpRequest(
   const httpAbortController = new AbortController();
 
   if (!stream) {
+    let responseSent = false;
     res.on("close", () => {
-      logWarn(`openresponses: client disconnected, aborting non-streaming run runId=${responseId}`);
-      httpAbortController.abort(new Error("client_disconnect"));
+      if (!responseSent) {
+        logWarn(`openresponses: client disconnected, aborting non-streaming run runId=${responseId}`);
+        httpAbortController.abort(new Error("client_disconnect"));
+      }
     });
     try {
       const result = await runResponsesAgentCommand({
@@ -773,6 +776,7 @@ export async function handleOpenResponsesHttpRequest(
           usage,
         });
         rememberResponseSession();
+        responseSent = true;
         sendJson(res, 200, response);
         return true;
       }
@@ -796,6 +800,7 @@ export async function handleOpenResponsesHttpRequest(
       });
 
       rememberResponseSession();
+      responseSent = true;
       sendJson(res, 200, response);
     } catch (err) {
       logWarn(`openresponses: non-stream response failed: ${String(err)}`);
@@ -807,6 +812,7 @@ export async function handleOpenResponsesHttpRequest(
         error: { code: "api_error", message: "internal error" },
       });
       rememberResponseSession();
+      responseSent = true;
       sendJson(res, 500, response);
     }
     return true;
