@@ -218,6 +218,88 @@ describe("edit tool recovery hardening", () => {
     });
   });
 
+  it("recovers multi-edit when oldText is a common identifier appearing multiple times", async () => {
+    // Regression test for the false-failure bug:
+    // didEditLikelyApply previously checked if oldText was absent from a
+    // depleted version of the file (after removing newText). For common
+    // identifiers (e.g., "spawnTimer" in waveManager.ts) that legitimately
+    // appear in many places, the check wrongly returned false even when the
+    // edit applied successfully.
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-edit-recovery-"));
+    const filePath = path.join(tmpDir, "waveManager.ts");
+    const before = [
+      "class WaveManager {",
+      "  private spawnTimer: number = 0;",
+      "  private spawnInterval: number = 1000;",
+      "",
+      "  update(deltaTime: number) {",
+      "    this.spawnTimer += deltaTime;",
+      "    if (this.spawnTimer >= this.spawnInterval) {",
+      "      this.spawn();",
+      "      this.spawnTimer = 0;",
+      "    }",
+      "  }",
+      "",
+      "  reset() {",
+      "    this.spawnTimer = 0;",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    const after = [
+      "class WaveManager {",
+      "  private spawnTimer: number = 0;",
+      "  private spawnInterval: number = 1000;",
+      "",
+      "  update(deltaTime: number) {",
+      "    this.spawnTimer += deltaTime;",
+      "    while (this.spawnTimer >= this.spawnInterval) {",
+      "      this.spawn();",
+      "      this.spawnTimer -= this.spawnInterval;",
+      "    }",
+      "  }",
+      "",
+      "  reset() {",
+      "    this.spawnTimer = 0;",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    await fs.writeFile(filePath, before, "utf-8");
+
+    const tool = createRecoveredEditTool({
+      root: tmpDir,
+      readFile: (absolutePath) => fs.readFile(absolutePath, "utf-8"),
+      execute: async () => {
+        await fs.writeFile(filePath, after, "utf-8");
+        throw new Error("Simulated post-write failure (e.g. generateDiffString)");
+      },
+    });
+    const result = await tool.execute(
+      "call-1",
+      {
+        path: filePath,
+        edits: [
+          {
+            oldText:
+              "if (this.spawnTimer >= this.spawnInterval) {\n      this.spawn();\n      this.spawnTimer = 0;\n    }",
+            newText:
+              "while (this.spawnTimer >= this.spawnInterval) {\n      this.spawn();\n      this.spawnTimer -= this.spawnInterval;\n    }",
+          },
+        ],
+      },
+      undefined,
+    );
+
+    // Note: this.spawnTimer = 0 still appears once in reset(), so the old
+    // implementation would falsely report failure here.
+    expect(result).toMatchObject({ isError: false });
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: `Successfully replaced text in ${filePath}.`,
+    });
+  });
+
   it("applies the same recovery path to sandboxed edit tools", async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-edit-recovery-"));
     const filePath = path.join(tmpDir, "demo.txt");

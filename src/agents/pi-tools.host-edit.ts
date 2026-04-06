@@ -75,10 +75,6 @@ function normalizeToLF(value: string): string {
   return value.replace(/\r\n?/g, "\n");
 }
 
-function removeExactOccurrences(content: string, needle: string): string {
-  return needle.length > 0 ? content.split(needle).join("") : content;
-}
-
 function didEditLikelyApply(params: {
   originalContent?: string;
   currentContent: string;
@@ -91,30 +87,80 @@ function didEditLikelyApply(params: {
   const normalizedOriginal =
     typeof params.originalContent === "string" ? normalizeToLF(params.originalContent) : undefined;
 
+  // If we have the original content and it's identical to current, the edit
+  // didn't change anything → not applied.
   if (normalizedOriginal !== undefined && normalizedOriginal === normalizedCurrent) {
     return false;
   }
 
-  let withoutInsertedNewText = normalizedCurrent;
+  // All non-empty newText replacements must now exist in the current file.
   for (const edit of params.edits) {
     const normalizedNew = normalizeToLF(edit.newText);
     if (normalizedNew.length > 0 && !normalizedCurrent.includes(normalizedNew)) {
       return false;
     }
-    withoutInsertedNewText =
-      normalizedNew.length > 0
-        ? removeExactOccurrences(withoutInsertedNewText, normalizedNew)
-        : withoutInsertedNewText;
   }
 
-  for (const edit of params.edits) {
-    const normalizedOld = normalizeToLF(edit.oldText);
-    if (withoutInsertedNewText.includes(normalizedOld)) {
-      return false;
+  // If we have the original content, verify each oldText was actually removed
+  // from its original position. We do this by counting occurrences of oldText
+  // in the original vs current — if the edit applied, current should have
+  // fewer occurrences (or the count went up but only because newText contains
+  // oldText as a substring, in which case we trust the previous newText check).
+  //
+  // BUG FIX: The previous implementation removed all newText occurrences from
+  // current and then checked if any oldText remained. This produced false
+  // failures when oldText was a common identifier appearing multiple times in
+  // the file (e.g., "spawnTimer" in waveManager.ts) — the depleted version
+  // still contained legitimate other occurrences, causing the check to wrongly
+  // report the edit as failed even when the file was correctly modified.
+  //
+  // The correct check: compare oldText counts in original vs current. The edit
+  // applied iff (current count of oldText) <= (original count - 1) for at least
+  // the oldText that was supposed to be replaced. Since newText may itself
+  // contain oldText as a substring, we additionally allow current count to be
+  // higher when newText contains oldText.
+  if (normalizedOriginal !== undefined) {
+    for (const edit of params.edits) {
+      const normalizedOld = normalizeToLF(edit.oldText);
+      if (normalizedOld.length === 0) {
+        continue;
+      }
+      const normalizedNew = normalizeToLF(edit.newText);
+      const originalCount = countOccurrences(normalizedOriginal, normalizedOld);
+      const currentCount = countOccurrences(normalizedCurrent, normalizedOld);
+      // newText may contain oldText as a substring; account for it.
+      const newTextOldCount =
+        normalizedNew.length > 0 ? countOccurrences(normalizedNew, normalizedOld) : 0;
+      // If newText contains oldText, each newText insertion adds newTextOldCount
+      // to the current count. Expected current count after a single replacement:
+      //   original - 1 + newTextOldCount
+      // Allow current count to be at most that value (multiple identical edits
+      // could push it lower).
+      const expectedMaxAfterReplace = originalCount - 1 + newTextOldCount;
+      if (currentCount > expectedMaxAfterReplace) {
+        return false;
+      }
     }
+    return true;
   }
 
+  // Without original content, we can only verify newText is present (already
+  // done above). Skip the oldText check since we can't reliably distinguish
+  // legitimate other occurrences from a failed replacement.
   return true;
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle.length === 0) {
+    return 0;
+  }
+  let count = 0;
+  let idx = 0;
+  while ((idx = haystack.indexOf(needle, idx)) !== -1) {
+    count++;
+    idx += needle.length;
+  }
+  return count;
 }
 
 function buildEditSuccessResult(pathParam: string, editCount: number): AgentToolResult<unknown> {
