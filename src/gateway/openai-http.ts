@@ -512,9 +512,12 @@ export async function handleOpenAiHttpRequest(
   const httpAbortController = new AbortController();
 
   if (!stream) {
+    let responseSent = false;
     res.on("close", () => {
-      logWarn(`openai-compat: client disconnected, aborting agent run runId=${runId}`);
-      httpAbortController.abort(new Error("client_disconnect"));
+      if (!responseSent) {
+        logWarn(`openai-compat: client disconnected, aborting agent run runId=${runId}`);
+        httpAbortController.abort(new Error("client_disconnect"));
+      }
     });
     try {
       const result = await agentCommandFromIngress(
@@ -525,6 +528,7 @@ export async function handleOpenAiHttpRequest(
 
       const content = resolveAgentResponseText(result);
 
+      responseSent = true;
       sendJson(res, 200, {
         id: runId,
         object: "chat.completion",
@@ -541,6 +545,7 @@ export async function handleOpenAiHttpRequest(
       });
     } catch (err) {
       logWarn(`openai-compat: chat completion failed: ${String(err)}`);
+      responseSent = true;
       sendJson(res, 500, {
         error: { message: "internal error", type: "api_error" },
       });
