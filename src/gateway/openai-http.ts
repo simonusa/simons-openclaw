@@ -513,6 +513,7 @@ export async function handleOpenAiHttpRequest(
 
   if (!stream) {
     res.on("close", () => {
+      logWarn(`openai-compat: client disconnected, aborting agent run runId=${runId}`);
       httpAbortController.abort(new Error("client_disconnect"));
     });
     try {
@@ -594,6 +595,9 @@ export async function handleOpenAiHttpRequest(
   });
 
   res.on("close", () => {
+    if (!closed) {
+      logWarn(`openai-compat: client disconnected, aborting streaming run runId=${runId}`);
+    }
     closed = true;
     unsubscribe();
     httpAbortController.abort(new Error("client_disconnect"));

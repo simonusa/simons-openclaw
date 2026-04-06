@@ -960,6 +960,9 @@ export async function handleOpenResponsesHttpRequest(
   // for up to agents.defaults.timeoutSeconds (e.g. 1200s).
   const httpAbortController = new AbortController();
   res.on("close", () => {
+    if (!closed) {
+      logWarn(`openresponses: client disconnected, aborting agent run runId=${responseId}`);
+    }
     closed = true;
     unsubscribe();
     httpAbortController.abort(new Error("client_disconnect"));
