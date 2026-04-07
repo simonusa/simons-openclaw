@@ -689,6 +689,9 @@ export async function runMemoryFlushIfNeeded(params: {
     await runWithModelFallback({
       ...resolveModelFallbackOptions(params.followupRun.run),
       runId: flushRunId,
+      // Propagate abort signal so terminal aborts (run-budget timeout, HTTP
+      // client disconnect) skip pointless fallback retries. Closes #60388.
+      abortSignal: params.replyOperation.abortSignal,
       run: async (provider, model, runOptions) => {
         const { embeddedContext, senderContext, runBaseParams } = buildEmbeddedRunExecutionParams({
           run: params.followupRun.run,

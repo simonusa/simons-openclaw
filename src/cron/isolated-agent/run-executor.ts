@@ -92,6 +92,9 @@ export function createCronPromptExecutor(params: {
       runId: params.cronSession.sessionEntry.sessionId,
       agentDir: params.agentDir,
       fallbacksOverride: cronFallbacksOverride,
+      // Propagate cron's abort signal so the fallback layer recognizes
+      // run-budget timeout aborts as terminal. Closes openclaw/openclaw#60388.
+      abortSignal: params.abortSignal,
       run: async (providerOverride, modelOverride, runOptions) => {
         if (params.abortSignal?.aborted) {
           throw new Error(params.abortReason());
