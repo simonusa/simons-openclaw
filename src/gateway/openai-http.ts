@@ -514,7 +514,12 @@ export async function handleOpenAiHttpRequest(
   });
 
   if (!stream) {
-    const stopWatchingDisconnect = watchClientDisconnect(req, res, abortController);
+    let responseSent = false;
+    const stopWatchingDisconnect = watchClientDisconnect(req, res, abortController, () => {
+      if (!responseSent) {
+        logWarn(`openai-compat: client disconnected, aborting non-streaming run runId=${runId}`);
+      }
+    });
     try {
       const result = await agentCommandFromIngress(commandInput, defaultRuntime, deps);
 
@@ -524,6 +529,7 @@ export async function handleOpenAiHttpRequest(
 
       const content = resolveAgentResponseText(result);
 
+      responseSent = true;
       sendJson(res, 200, {
         id: runId,
         object: "chat.completion",
@@ -543,6 +549,7 @@ export async function handleOpenAiHttpRequest(
         return true;
       }
       logWarn(`openai-compat: chat completion failed: ${String(err)}`);
+      responseSent = true;
       sendJson(res, 500, {
         error: { message: "internal error", type: "api_error" },
       });
@@ -601,6 +608,9 @@ export async function handleOpenAiHttpRequest(
   });
 
   stopWatchingDisconnect = watchClientDisconnect(req, res, abortController, () => {
+    if (!closed) {
+      logWarn(`openai-compat: client disconnected, aborting streaming run runId=${runId}`);
+    }
     closed = true;
     unsubscribe();
   });

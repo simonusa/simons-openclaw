@@ -684,7 +684,12 @@ export async function handleOpenResponsesHttpRequest(
       : undefined;
 
   if (!stream) {
-    const stopWatchingDisconnect = watchClientDisconnect(req, res, abortController);
+    let responseSent = false;
+    const stopWatchingDisconnect = watchClientDisconnect(req, res, abortController, () => {
+      if (!responseSent) {
+        logWarn(`openresponses: client disconnected, aborting non-streaming run runId=${responseId}`);
+      }
+    });
     try {
       const result = await runResponsesAgentCommand({
         message: prompt.message,
@@ -751,6 +756,7 @@ export async function handleOpenResponsesHttpRequest(
           usage,
         });
         rememberResponseSession();
+        responseSent = true;
         sendJson(res, 200, response);
         return true;
       }
@@ -779,6 +785,7 @@ export async function handleOpenResponsesHttpRequest(
       });
 
       rememberResponseSession();
+      responseSent = true;
       sendJson(res, 200, response);
     } catch (err) {
       if (abortController.signal.aborted) {
@@ -793,6 +800,7 @@ export async function handleOpenResponsesHttpRequest(
         error: { code: "api_error", message: "internal error" },
       });
       rememberResponseSession();
+      responseSent = true;
       sendJson(res, 500, response);
     } finally {
       stopWatchingDisconnect();
@@ -957,6 +965,9 @@ export async function handleOpenResponsesHttpRequest(
   });
 
   stopWatchingDisconnect = watchClientDisconnect(req, res, abortController, () => {
+    if (!closed) {
+      logWarn(`openresponses: client disconnected, aborting streaming run runId=${responseId}`);
+    }
     closed = true;
     unsubscribe();
   });
