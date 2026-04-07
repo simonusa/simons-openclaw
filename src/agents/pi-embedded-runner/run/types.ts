@@ -3,12 +3,13 @@ import type { Api, AssistantMessage, Model } from "@mariozechner/pi-ai";
 import type { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import type { SessionSystemPromptReport } from "../../../config/sessions/types.js";
-import type { ContextEngine } from "../../../context-engine/types.js";
+import type { ContextEngine, ContextEnginePromptCacheInfo } from "../../../context-engine/types.js";
 import type { PluginHookBeforeAgentStartResult } from "../../../plugins/types.js";
 import type { MessagingToolSend } from "../../pi-embedded-messaging.js";
 import type { ToolErrorSummary } from "../../tool-error-summary.js";
 import type { NormalizedUsage } from "../../usage.js";
 import type { RunEmbeddedPiAgentParams } from "./params.js";
+import type { PreemptiveCompactionRoute } from "./preemptive-compaction.js";
 
 type EmbeddedRunAttemptBase = Omit<
   RunEmbeddedPiAgentParams,
@@ -41,6 +42,16 @@ export type EmbeddedRunAttemptResult = {
   /** True if the timeout occurred while compaction was in progress or pending. */
   timedOutDuringCompaction: boolean;
   promptError: unknown;
+  preflightRecovery?:
+    | {
+        route: Exclude<PreemptiveCompactionRoute, "fits">;
+        handled: true;
+        truncatedCount?: number;
+      }
+    | {
+        route: Exclude<PreemptiveCompactionRoute, "fits">;
+        handled?: false;
+      };
   sessionIdUsed: string;
   bootstrapPromptWarningSignaturesSeen?: string[];
   bootstrapPromptWarningSignature?: string;
@@ -58,6 +69,7 @@ export type EmbeddedRunAttemptResult = {
   successfulCronAdds?: number;
   cloudCodeAssistFormatError: boolean;
   attemptUsage?: NormalizedUsage;
+  promptCache?: ContextEnginePromptCacheInfo;
   compactionCount?: number;
   /** Client tool call detected (OpenResponses hosted tools). */
   clientToolCall?: { name: string; params: Record<string, unknown> };
@@ -66,5 +78,10 @@ export type EmbeddedRunAttemptResult = {
   replayMetadata: {
     hadPotentialSideEffects: boolean;
     replaySafe: boolean;
+  };
+  itemLifecycle: {
+    startedCount: number;
+    completedCount: number;
+    activeCount: number;
   };
 };

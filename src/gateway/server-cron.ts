@@ -9,7 +9,11 @@ import {
   resolveAgentMainSessionKey,
 } from "../config/sessions.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
-import { resolveFailureDestination, sendFailureNotificationAnnounce } from "../cron/delivery.js";
+import {
+  resolveCronDeliveryPlan,
+  resolveFailureDestination,
+  sendFailureNotificationAnnounce,
+} from "../cron/delivery.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { resolveDeliveryTarget } from "../cron/isolated-agent/delivery-target.js";
 import {
@@ -31,6 +35,10 @@ import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
 import { normalizeAgentId, toAgentStoreSessionKey } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../shared/string-coerce.js";
 
 export type GatewayCronState = {
   cron: CronService;
@@ -39,14 +47,6 @@ export type GatewayCronState = {
 };
 
 const CRON_WEBHOOK_TIMEOUT_MS = 10_000;
-
-function trimToOptionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
 
 function redactWebhookUrl(url: string): string {
   try {
@@ -67,7 +67,7 @@ function resolveCronWebhookTarget(params: {
   legacyNotify?: boolean;
   legacyWebhook?: string;
 }): CronWebhookTarget | null {
-  const mode = params.delivery?.mode?.trim().toLowerCase();
+  const mode = normalizeOptionalLowercaseString(params.delivery?.mode);
   if (mode === "webhook") {
     const url = normalizeHttpWebhookUrl(params.delivery?.to);
     return url ? { url, source: "delivery" } : null;
@@ -310,7 +310,7 @@ export function buildGatewayCronService(params: {
     },
     sendCronFailureAlert: async ({ job, text, channel, to, mode, accountId }) => {
       const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
-      const webhookToken = trimToOptionalString(params.cfg.cron?.webhookToken);
+      const webhookToken = normalizeOptionalString(params.cfg.cron?.webhookToken);
 
       // Webhook mode requires a URL - fail closed if missing
       if (mode === "webhook" && !to) {
@@ -371,8 +371,8 @@ export function buildGatewayCronService(params: {
     onEvent: (evt) => {
       params.broadcast("cron", evt, { dropIfSlow: true });
       if (evt.action === "finished") {
-        const webhookToken = trimToOptionalString(params.cfg.cron?.webhookToken);
-        const legacyWebhook = trimToOptionalString(params.cfg.cron?.webhook);
+        const webhookToken = normalizeOptionalString(params.cfg.cron?.webhookToken);
+        const legacyWebhook = normalizeOptionalString(params.cfg.cron?.webhook);
         const job = cron.getJob(evt.jobId);
         const legacyNotify = (job as { notify?: unknown } | undefined)?.notify === true;
         const webhookTarget = resolveCronWebhookTarget({
@@ -420,12 +420,13 @@ export function buildGatewayCronService(params: {
         }
 
         if (evt.status === "error" && job) {
-          const failureDest = resolveFailureDestination(job, params.cfg.cron?.failureDestination);
-          if (failureDest) {
-            const isBestEffort = job.delivery?.bestEffort === true;
+          const isBestEffort = job.delivery?.bestEffort === true;
+          if (!isBestEffort) {
+            const failureMessage = `Cron job "${job.name}" failed: ${evt.error ?? "unknown error"}`;
+            const failureDest = resolveFailureDestination(job, params.cfg.cron?.failureDestination);
 
-            if (!isBestEffort) {
-              const failureMessage = `Cron job "${job.name}" failed: ${evt.error ?? "unknown error"}`;
+            if (failureDest) {
+              // Explicit failureDestination configured — use it
               const failurePayload = {
                 jobId: job.id,
                 jobName: job.name,
@@ -471,8 +472,28 @@ export function buildGatewayCronService(params: {
                     channel: failureDest.channel,
                     to: failureDest.to,
                     accountId: failureDest.accountId,
+                    sessionKey: job.sessionKey,
                   },
-                  `[Cron Failure] ${failureMessage}`,
+                  `⚠️ ${failureMessage}`,
+                );
+              }
+            } else {
+              // No explicit failureDestination — fall back to primary delivery channel (#60608)
+              const primaryPlan = resolveCronDeliveryPlan(job);
+              if (primaryPlan.mode === "announce" && primaryPlan.requested) {
+                const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
+                void sendFailureNotificationAnnounce(
+                  params.deps,
+                  runtimeConfig,
+                  agentId,
+                  job.id,
+                  {
+                    channel: primaryPlan.channel,
+                    to: primaryPlan.to,
+                    accountId: primaryPlan.accountId,
+                    sessionKey: job.sessionKey,
+                  },
+                  `⚠️ ${failureMessage}`,
                 );
               }
             }
