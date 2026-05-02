@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Gateway/tools-invoke: wire coding primitive tools (`read`, plus opt-in `write`/`edit`/`exec`/`process`) into the HTTP `/tools/invoke` endpoint via a new unwrapped factory `createOpenClawCodingToolsRaw()`. Enables deterministic automation flows (linting, tests, browser capture) without a full LLM round-trip. The new factory honors the resolver's plugin-suppression intent end-to-end and excludes provider-gated tools (`apply_patch`) that cannot be safely materialized without session-bound model context. The default HTTP deny list now also includes the canonical mutating tool names `write`, `edit`, and `process`, so they require explicit `gateway.tools.allow` opt-in. Refs #37131. Thanks @simonusa.
 - Plugins/CLI: include package dependency install state in `openclaw plugins list --json` so scripts can spot missing plugin dependencies without runtime-loading plugins.
 - Plugins/update: on the beta OpenClaw update channel, default-line npm and ClawHub plugin updates try `@beta` first and fall back to default/latest when no plugin beta release exists.
 
